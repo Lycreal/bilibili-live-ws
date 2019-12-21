@@ -54,16 +54,21 @@ class LiveTCP(Live):
     async def connect(self, host='broadcastlv.chat.bilibili.com', port=2243):
         self.reader, self.writer = await asyncio.open_connection(host, port)
 
+    async def close(self):
+        self.writer.close()
+        await self.writer.wait_closed()
+
     async def send(self, data: bytes):
         self.writer.write(data)
 
     async def recv(self):
-        data_1 = b''
-        while not data_1:
-            data_1 = await self.reader.read(4)
-        lenth = struct.unpack('!i', data_1)[0]
-        data_2 = await self.reader.read(lenth - 4)
-        return data_1 + data_2
+        pack = b''
+        while len(pack) < 4:
+            pack += await self.reader.read(4 - len(pack))
+        size = struct.unpack('!i', pack)[0]
+        while len(pack) < size:
+            pack += await self.reader.read(size - len(pack))
+        return pack
 
 
 class LiveWS(Live):
