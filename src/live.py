@@ -1,50 +1,36 @@
 import asyncio
-import struct
-from buffer import *
+from abc import abstractmethod
+from buffer import DataPacket, Operation
 
 __all__ = ['LiveTCP', 'LiveWS']
 
 
 class Live:
-    rid: int
-    online = 0
-
     def __init__(self, rid):
         self.rid = rid  # room_id
         self.online = 0
 
-    def send(self, data):
-        pass
+    @abstractmethod
+    async def send(self, data: bytes):
+        raise NotImplementedError
 
-    async def recv(self):
-        return b''
+    @abstractmethod
+    async def recv(self) -> bytes:
+        raise NotImplementedError
 
     async def open(self):
-        dic = {
-            "type_": "join",
-            "data": {
-                "uid": 0,
-                "roomid": self.rid,
-                "protover": 2,
-                "platform": "web",
-                "clientver": "1.8.5",
-                "type": 2
-            }
-        }
-        await self.send(DataPacket(**dic).encode())
-
-    async def heartbeat(self):
-        await self.send(DataPacket(type_='heartbeat').encode())
+        await self.send(DataPacket.join(self.rid).encode())
 
     async def keep_alive(self):
         while True:
-            await self.heartbeat()
+            await self.send(DataPacket(operation=Operation.HEARTBEAT).encode())
             await asyncio.sleep(30)
 
     async def listen(self):
         while True:
-            recv_bytes = await self.recv()
-            print(RawDataPacket.decode(recv_bytes))
+            recv_bytes: bytes = await self.recv()
+            for pack in DataPacket.decode(recv_bytes):
+                print(pack.decode_body())
 
 
 class LiveTCP(Live):
@@ -61,11 +47,11 @@ class LiveTCP(Live):
     async def send(self, data: bytes):
         self.writer.write(data)
 
-    async def recv(self):
+    async def recv(self) -> bytes:
         pack = b''
         while len(pack) < 4:
             pack += await self.reader.read(4 - len(pack))
-        size = struct.unpack('!i', pack)[0]
+        size = int.from_bytes(pack, 'big')
         while len(pack) < size:
             pack += await self.reader.read(size - len(pack))
         return pack
@@ -84,20 +70,6 @@ class LiveWS(Live):
     async def send(self, *args):
         await self.socket.send(*args)
 
-    async def recv(self):
-        return await self.socket.recv()
-
-
-async def test_main():
-    aqua = LiveWS(14917277)
-    await aqua.connect()
-    await aqua.open()
-
-    await asyncio.gather(
-        aqua.keep_alive(),
-        aqua.listen()
-    )
-
-
-if __name__ == '__main__':
-    asyncio.run(test_main())
+    async def recv(self) -> bytes:
+        data = await self.socket.recv()
+        return data.encode() if isinstance(data, str) else data
